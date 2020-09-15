@@ -4,13 +4,18 @@ cd ${SH_PATH}
 
 create_mainfest_file(){
     echo "进行配置。。。"
+    echo "请务必确认用户名称和密码正确，否则可能导致无法重启！！！"
+    read -p "请输入你的用户名：" IBM_User_NAME
+    echo "用户名称：${IBM_User_NAME}"
+    read -p "请输入你的密码：" IBM_Passwd
+    echo "用户密码：${IBM_Passwd}"
+    ibmcloud login -a "https://cloud.ibm.com" -r "us-south" -u "${IBM_User_NAME}" -p "${IBM_Passwd}"
     read -p "请输入你的应用名称：" IBM_APP_NAME
     echo "应用名称：${IBM_APP_NAME}"
-	read -p "请输入你的运行环境：" IBM_APP_NUM
+    read -p "请输入你的运行环境：" IBM_APP_NUM
     echo "运行环境：${IBM_APP_NUM}"
-	read -p "请输入V2伪装文件名称：" IBM_V2_NAME
+    read -p "请输入V2伪装文件名称：" IBM_V2_NAME
     echo "伪装名称：${IBM_V2_NAME}"
-	echo "生成随机UUID：${UUID}"
     WSPATH=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 16)
     echo "生成随机WebSocket路径：${WSPATH}"
     read -p "请输入你的应用内存大小(默认256)：" IBM_MEM_SIZE
@@ -18,23 +23,40 @@ create_mainfest_file(){
     IBM_MEM_SIZE=256
     fi
     echo "内存大小：${IBM_MEM_SIZE}"
+    echo "生成随机UUID：${UUID}"
     UUID=$(cat /proc/sys/kernel/random/uuid)
     echo "生成随机UUID：${UUID}"
     
-    
-    cat >  ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}/manifest.yml  << EOF
+    # 设置容器配置文件
+    cat >  ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/manifest.yml  << EOF
     applications:
     - path: .
       name: ${IBM_APP_NAME}
       random-route: true
       memory: ${IBM_MEM_SIZE}M
 EOF
-	cat >  ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}/Procfile  << EOF
-    web: ./${IBM_V2_NAME}/${IBM_V2_NAME}
+	# 配置预启动（容器开机后优先启动）
+	cat >  ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/Procfile  << EOF
+    web: ./start.sh
+
+EOF
+	# 配置预启动文件
+	cat >  ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/start.sh  << EOF
+    #!/bin/bash
+    tar zxvf ./${IBM_V2_NAME}/1.tar -C ./${IBM_V2_NAME}
+    chmod 0755 ./${IBM_V2_NAME}/config.json
+    
+    ./${IBM_V2_NAME}/${IBM_V2_NAME} &
+    sleep 4d
+    
+    ./cf l -a https://api.us-south.cf.cloud.ibm.com login -u "${IBM_User_NAME}" -p "${IBM_Passwd}"
+    
+    ./cf rs ${IBM_APP_NAME}
 
 EOF
 
-    cat >  ${SH_PATH}/IBMAllYes/cherbim/v2ray/config.json  << EOF
+	# 配置v2ray
+    cat >  ${SH_PATH}/IBMYesPLus/cherbim/v2ray/config.json  << EOF
     {
         "inbounds": [
             {
@@ -64,14 +86,16 @@ EOF
         ]
     }
 EOF
+    chmod 0755 ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/start.sh
+    chmod 0755 ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/cf
     echo "配置完成。"
 }
 
 clone_repo(){
     echo "进行初始化。。。"
-	rm -rf IBMAllYes
-    git clone https://github.com/w2r/IBMAllYes.git
-    cd IBMAllYes
+    rm -rf IBMYesPLus
+    git clone https://github.com/w2r/IBMYesPLus.git
+    cd IBMYesPLus
     git submodule update --init --recursive
     cd cherbim/v2ray
     # Upgrade V2Ray to the latest version
@@ -98,28 +122,30 @@ clone_repo(){
     rm latest-v2ray.zip
     
     chmod 0755 ./*
-    cd ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}
+    cd ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}
     echo "初始化完成。"
 }
 
 install(){
     echo "进行安装。。。"
-    cd ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}
-	# 把v2ray伪装成其他文件夹（比如cherbim，请自行命名，最好全英文）
-	mv ${SH_PATH}/IBMAllYes/cherbim/v2ray ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}
-	mv ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}/v2ray ${SH_PATH}/IBMAllYes/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}/${IBM_V2_NAME}
-	# 把代码push到容器
+    # 把v2ray伪装成其他文件夹（比如cherbim，请自行命名，最好全英文）
+    mv ${SH_PATH}/IBMYesPLus/cherbim/v2ray ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}
+    mv ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}/v2ray ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}/${IBM_V2_NAME}
+    cd ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}/
+    tar czvf 1.tar config.json
+    rm -rf ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}/${IBM_V2_NAME}/config.json
+    cd ${SH_PATH}/IBMYesPLus/w2r/${IBM_APP_NUM}
+    # 把代码push到容器
     ibmcloud target --cf
     echo "N"|ibmcloud cf install
     ibmcloud cf push
     echo "安装完成。"
-    echo "生成的随机 UUID：${UUID}"
 	
     VMESSCODE=$(base64 -w 0 << EOF
     {
       "v": "2",
       "ps": "ibmyes",
-      "add": "*****.us-south.cf.appdomain.cloud",
+      "add": "${IBM_APP_NAME}.us-south.cf.appdomain.cloud",
       "port": "443",
       "id": "${UUID}",
       "aid": "4",
